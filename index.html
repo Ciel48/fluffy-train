@@ -1,0 +1,1086 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>地震動の可視化</title>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <style>
+    :root {
+      color-scheme: light;
+      --line: #d7dde8;
+      --ink: #172033;
+      --muted: #687386;
+      --accent: #1864ab;
+      --soft: #eef5ff;
+      --danger: #b42318;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--ink);
+      background: #f7f8fb;
+    }
+
+    main {
+      width: min(1120px, calc(100vw - 32px));
+      margin: 24px auto 40px;
+    }
+
+    h1 {
+      margin: 0 0 18px;
+      font-size: 24px;
+      letter-spacing: 0;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 320px 1fr;
+      gap: 16px;
+      align-items: start;
+    }
+
+    .panel,
+    .viewer {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+    }
+
+    .panel {
+      padding: 16px;
+    }
+
+    .viewer {
+      padding: 14px;
+    }
+
+    .field {
+      display: grid;
+      gap: 6px;
+      margin-bottom: 13px;
+      text-align: left;
+    }
+
+    label {
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    input,
+    select {
+      width: 100%;
+      min-height: 36px;
+      border: 1px solid #c9d1df;
+      border-radius: 6px;
+      padding: 6px 9px;
+      font-size: 14px;
+      background: #fff;
+    }
+
+    input[type="range"] {
+      padding: 0;
+    }
+
+    .row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .buttons {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 8px;
+      margin-top: 16px;
+    }
+
+    .timebar {
+      display: grid;
+      grid-template-columns: 56px 1fr 56px;
+      align-items: center;
+      gap: 8px;
+      margin-top: 14px;
+      color: var(--muted);
+      font-size: 12px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .timebar input {
+      min-height: 24px;
+    }
+
+    .timebar span:last-child {
+      text-align: right;
+    }
+
+    .range-readout {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.35;
+      font-variant-numeric: tabular-nums;
+    }
+
+    button {
+      min-height: 38px;
+      border: 1px solid #b9c5d6;
+      border-radius: 6px;
+      background: #fff;
+      color: var(--ink);
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    button.primary {
+      border-color: var(--accent);
+      background: var(--accent);
+      color: #fff;
+    }
+
+    button:hover {
+      filter: brightness(0.98);
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fff;
+    }
+
+    #motion {
+      height: 420px;
+    }
+
+    #graph {
+      height: 300px;
+      margin-top: 12px;
+    }
+
+    .status {
+      min-height: 38px;
+      margin-top: 12px;
+      padding: 9px 10px;
+      border-radius: 6px;
+      background: var(--soft);
+      color: #26384f;
+      font-size: 13px;
+      line-height: 1.5;
+      text-align: left;
+    }
+
+    .status.error {
+      background: #fff1f0;
+      color: var(--danger);
+    }
+
+    .hint {
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.55;
+      text-align: left;
+    }
+
+    @media (max-width: 820px) {
+      .layout {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>地震動の可視化</h1>
+
+    <div class="layout">
+      <section class="panel" aria-label="入力設定">
+        <div class="field">
+          <label for="folderInput">データフォルダ</label>
+          <input id="folderInput" type="file" webkitdirectory multiple accept=".csv,.tsv,.txt,.xlsx,.xls">
+        </div>
+
+        <div class="field">
+          <label for="networkSelect">データ種類</label>
+          <select id="networkSelect" disabled>
+            <option value="">フォルダを選択してください</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="stationGroupSelect">観測点グループ</label>
+          <select id="stationGroupSelect" disabled>
+            <option value="">フォルダを選択してください</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="dataFileSelect">フォルダ内の観測点ファイル</label>
+          <select id="dataFileSelect" disabled>
+            <option>フォルダを選択してください</option>
+          </select>
+        </div>
+
+        <div class="row">
+          <div class="field">
+            <label for="timeColumn">時刻列</label>
+            <select id="timeColumn"></select>
+          </div>
+          <div class="field">
+            <label for="accColumn">加速度列</label>
+            <select id="accColumn"></select>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="field">
+            <label for="accUnit">加速度単位</label>
+            <select id="accUnit">
+              <option value="gal">gal（cm/s²）</option>
+              <option value="mps2">m/s²</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="timeStep">時刻刻み dt [s]</label>
+            <input id="timeStep" type="number" min="0.001" step="0.001" value="0.01">
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="field">
+            <label for="omega">固有円振動数 ω [rad/s]</label>
+            <input id="omega" type="number" step="0.001" value="5">
+          </div>
+          <div class="field">
+            <label for="h">減衰定数 h</label>
+            <input id="h" type="number" min="0" max="1" step="0.001" value="0.05">
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="field">
+            <label for="speed">再生速度</label>
+            <input id="speed" type="range" min="0.25" max="8" step="0.25" value="1" list="speedMarks">
+            <datalist id="speedMarks">
+              <option value="1" label="等速"></option>
+            </datalist>
+            <div class="range-readout">
+              <span>現在: <span id="speedValue">1.00倍</span></span>
+              <span>等速: 1.00倍</span>
+            </div>
+          </div>
+          <div class="field">
+            <label for="zoom">変位表示倍率</label>
+            <input id="zoom" type="range" min="0.5" max="80" step="0.5" value="1" list="zoomMarks">
+            <datalist id="zoomMarks">
+              <option value="1" label="実際目安"></option>
+            </datalist>
+            <div class="range-readout">
+              <span>現在: <span id="zoomValue">1.0倍</span></span>
+              <span>実際目安: 1.0倍</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="modelSelect">表示モデル</label>
+          <select id="modelSelect">
+            <option value="mass">一質点系モデル</option>
+            <option value="house">家モデル</option>
+          </select>
+        </div>
+
+        <div class="buttons">
+          <button class="primary" id="startButton">スタート</button>
+          <button id="pauseButton">一時停止</button>
+          <button id="resetButton">リセット</button>
+        </div>
+
+        <div class="timebar" aria-label="時間操作">
+          <span id="currentTimeLabel">0.00 s</span>
+          <input id="timeSlider" type="range" min="0" max="0" step="0.01" value="0">
+          <span id="durationLabel">0.00 s</span>
+        </div>
+
+        <div id="status" class="status">データフォルダを選ぶと、種類・観測点を指定して実地震動を入力できます。未選択時はサンプル波を表示します。</div>
+        <div class="hint">
+          1行目に列名があるCSVのほか、K-NET/KiK-net CSVの `#Time,RelativeTime(s),...` 形式に対応しています。<br>
+          `20240101160813` のような親フォルダを選ぶと、中の K-NET / KiK-net を自動判定して選択できます。<br>
+          Excel読み込みにはインターネット接続、またはSheetJSのローカル配置が必要です。CSVはこのHTMLだけで読めます。
+        </div>
+      </section>
+
+      <section class="viewer" aria-label="可視化">
+        <canvas id="motion" width="700" height="420"></canvas>
+        <canvas id="graph" width="700" height="300"></canvas>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    const motionCanvas = document.getElementById("motion");
+    const graphCanvas = document.getElementById("graph");
+    const m = motionCanvas.getContext("2d");
+    const g = graphCanvas.getContext("2d");
+
+    const folderInput = document.getElementById("folderInput");
+    const networkSelect = document.getElementById("networkSelect");
+    const stationGroupSelect = document.getElementById("stationGroupSelect");
+    const dataFileSelect = document.getElementById("dataFileSelect");
+    const timeColumn = document.getElementById("timeColumn");
+    const accColumn = document.getElementById("accColumn");
+    const accUnit = document.getElementById("accUnit");
+    const timeStep = document.getElementById("timeStep");
+    const omegaInput = document.getElementById("omega");
+    const hInput = document.getElementById("h");
+    const speedInput = document.getElementById("speed");
+    const zoomInput = document.getElementById("zoom");
+    const speedValue = document.getElementById("speedValue");
+    const zoomValue = document.getElementById("zoomValue");
+    const modelSelect = document.getElementById("modelSelect");
+    const timeSlider = document.getElementById("timeSlider");
+    const currentTimeLabel = document.getElementById("currentTimeLabel");
+    const durationLabel = document.getElementById("durationLabel");
+    const statusBox = document.getElementById("status");
+
+    let rows = [];
+    let headers = [];
+    let folderFiles = [];
+    let visibleFolderFileIndexes = [];
+    let columnOffsets = {};
+    let currentSourceLabel = "サンプル波";
+    let inputMotion = makeSampleMotion();
+    let response = [];
+    let t = 0;
+    let running = false;
+    let lastFrameTime = null;
+
+    function numberValue(el, fallback) {
+      const value = Number.parseFloat(el.value);
+      return Number.isFinite(value) ? value : fallback;
+    }
+
+    function setStatus(message, isError = false) {
+      statusBox.textContent = message;
+      statusBox.classList.toggle("error", isError);
+    }
+
+    function syncRangeReadouts() {
+      speedValue.textContent = `${numberValue(speedInput, 1).toFixed(2)}倍`;
+      zoomValue.textContent = `${numberValue(zoomInput, 1).toFixed(1)}倍`;
+    }
+
+    function endTime() {
+      return response.length ? response[response.length - 1].time : 0;
+    }
+
+    function formatSeconds(seconds) {
+      return `${seconds.toFixed(2)} s`;
+    }
+
+    function syncTimeControls() {
+      const duration = endTime();
+      t = Math.min(t, duration);
+      timeSlider.max = String(Math.max(0, duration));
+      timeSlider.value = String(Math.min(t, duration));
+      currentTimeLabel.textContent = formatSeconds(t);
+      durationLabel.textContent = formatSeconds(duration);
+    }
+
+    function setPlaybackTime(value) {
+      const duration = endTime();
+      const nextTime = Number.parseFloat(value);
+      t = Math.min(duration, Math.max(0, Number.isFinite(nextTime) ? nextTime : 0));
+      syncTimeControls();
+    }
+
+    function makeSampleMotion() {
+      const dt = 0.01;
+      const points = [];
+      for (let i = 0; i <= 2000; i++) {
+        const time = i * dt;
+        const envelope = Math.exp(-0.18 * time) * Math.min(1, time / 1.5);
+        const acc = 120 * envelope * (
+          Math.sin(2 * Math.PI * 1.2 * time) +
+          0.55 * Math.sin(2 * Math.PI * 2.7 * time + 0.8)
+        );
+        points.push({ time, acc });
+      }
+      return points;
+    }
+
+    function splitDelimitedLine(line, delimiter) {
+      const cells = [];
+      let current = "";
+      let quoted = false;
+      for (let i = 0; i < line.length; i++) {
+        const char = line[i];
+        const next = line[i + 1];
+        if (char === "\"" && quoted && next === "\"") {
+          current += "\"";
+          i += 1;
+        } else if (char === "\"") {
+          quoted = !quoted;
+        } else if (char === delimiter && !quoted) {
+          cells.push(current.trim());
+          current = "";
+        } else {
+          current += char;
+        }
+      }
+      cells.push(current.trim());
+      return cells;
+    }
+
+    function detectDelimiter(line) {
+      const candidates = [",", "\t", ";"];
+      return candidates
+        .map(delimiter => ({ delimiter, count: line.split(delimiter).length }))
+        .sort((a, b) => b.count - a.count)[0].delimiter;
+    }
+
+    function parseDelimited(text) {
+      columnOffsets = {};
+      const lines = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+      if (lines.length < 2) return [];
+
+      const knetHeaderIndex = lines.findIndex(line => /^#\s*Time\s*[,;\t]\s*RelativeTime\(s\)/i.test(line));
+      if (knetHeaderIndex >= 0) {
+        const headerLine = lines[knetHeaderIndex].replace(/^#\s*/, "");
+        const delimiter = detectDelimiter(headerLine);
+        const offsetIndex = lines.findIndex(line => /^#\s*Offset\s*$/i.test(line));
+        if (offsetIndex >= 0 && lines[offsetIndex + 1] && lines[offsetIndex + 2]) {
+          const offsetHeaderLine = lines[offsetIndex + 1].replace(/^#\s*/, "");
+          const offsetHeaders = splitDelimitedLine(offsetHeaderLine, detectDelimiter(offsetHeaderLine));
+          const offsetValues = splitDelimitedLine(lines[offsetIndex + 2].replace(/^#\s*/, ""), detectDelimiter(lines[offsetIndex + 2]));
+          offsetHeaders.forEach((header, index) => {
+            const value = parseNumberCell(offsetValues[index]);
+            if (Number.isFinite(value)) columnOffsets[header] = value;
+          });
+        }
+        const table = [splitDelimitedLine(headerLine, delimiter)];
+        for (const line of lines.slice(knetHeaderIndex + 1)) {
+          if (line.startsWith("#")) continue;
+          table.push(splitDelimitedLine(line, delimiter));
+        }
+        return table;
+      }
+
+      const firstTableLine = lines.find(line => !line.startsWith("#")) || lines[0].replace(/^#\s*/, "");
+      const delimiter = detectDelimiter(firstTableLine);
+      return lines
+        .filter(line => !line.startsWith("#") || /^#\s*(time|時刻|relative)/i.test(line))
+        .map(line => splitDelimitedLine(line.replace(/^#\s*/, ""), delimiter));
+    }
+
+    function populateColumns(table, sourceLabel = currentSourceLabel) {
+      if (!table || table.length < 2) {
+        setStatus("有効な表データを読み取れませんでした。", true);
+        return;
+      }
+
+      rows = table;
+      headers = table[0].map((value, index) => String(value || `列${index + 1}`));
+      timeColumn.innerHTML = "";
+      accColumn.innerHTML = "";
+
+      headers.forEach((header, index) => {
+        timeColumn.append(new Option(header, String(index)));
+        accColumn.append(new Option(header, String(index)));
+      });
+
+      const relativeTimeGuess = headers.findIndex(h => /relative\s*time|relativetime|相対.*時|経過.*時/i.test(h));
+      const timeGuess = relativeTimeGuess >= 0
+        ? relativeTimeGuess
+        : headers.findIndex(h => /time|時刻|秒|sec/i.test(h));
+      const accGuess = headers.findIndex(h => /acc|加速度|gal|cm\/s|m\/s|^n-s|^e-w|^u-d|^[1-6]\(gal\)$/i.test(h));
+      timeColumn.value = String(timeGuess >= 0 ? timeGuess : 0);
+      accColumn.value = String(accGuess >= 0 ? accGuess : Math.min(1, headers.length - 1));
+      updateMotionFromRows(sourceLabel);
+    }
+
+    function parseNumberCell(value) {
+      const text = String(value ?? "").trim().replace(/,/g, "");
+      if (!text) return NaN;
+      return /^[-+]?\d*\.?\d+(?:e[-+]?\d+)?$/i.test(text) ? Number.parseFloat(text) : NaN;
+    }
+
+    function parseTimeCell(value) {
+      const numeric = parseNumberCell(value);
+      if (Number.isFinite(numeric)) return numeric;
+
+      const text = String(value ?? "").trim();
+      const normalized = text.replace(/\//g, "-").replace(" ", "T");
+      const timestamp = Date.parse(normalized);
+      return Number.isFinite(timestamp) ? timestamp / 1000 : NaN;
+    }
+
+    function estimateBaseline(points) {
+      if (!points.length) return 0;
+      const sorted = [...points].sort((a, b) => a.time - b.time);
+      const startTime = sorted[0].time;
+      const firstSecond = sorted.filter(point => point.time <= startTime + 1);
+      const sample = firstSecond.length >= 10 ? firstSecond : sorted.slice(0, Math.min(100, sorted.length));
+      const sum = sample.reduce((total, point) => total + point.acc, 0);
+      return sample.length ? sum / sample.length : 0;
+    }
+
+    function updateMotionFromRows(sourceLabel = currentSourceLabel) {
+      if (rows.length < 2) return;
+
+      const timeIndex = Number.parseInt(timeColumn.value, 10);
+      const accIndex = Number.parseInt(accColumn.value, 10);
+      const unitScale = accUnit.value === "gal" ? 0.01 : 1;
+      const dtFallback = Math.max(0.001, numberValue(timeStep, 0.01));
+      const headerName = headers[accIndex];
+      const headerOffset = parseNumberCell(columnOffsets[headerName]);
+
+      const rawPoints = [];
+      for (const row of rows.slice(1)) {
+        const rawTime = parseTimeCell(row[timeIndex]);
+        const rawAcc = parseNumberCell(row[accIndex]);
+        if (Number.isFinite(rawAcc)) {
+          const time = Number.isFinite(rawTime) ? rawTime : rawPoints.length * dtFallback;
+          rawPoints.push({ time, acc: rawAcc * unitScale });
+        }
+      }
+
+      if (rawPoints.length < 2) {
+        setStatus("時刻列と加速度列から有効な数値データを読み取れませんでした。", true);
+        return;
+      }
+
+      const baseline = Number.isFinite(headerOffset)
+        ? headerOffset * unitScale
+        : estimateBaseline(rawPoints);
+      const minTime = Math.min(...rawPoints.map(point => point.time));
+      const normalizeTime = minTime > 1000000 ? minTime : 0;
+      const points = rawPoints.map(point => ({
+        time: point.time - normalizeTime,
+        acc: point.acc - baseline
+      }));
+
+      points.sort((a, b) => a.time - b.time);
+
+      if (points.length < 2) {
+        setStatus("時刻列と加速度列から有効な数値データを読み取れませんでした。", true);
+        return;
+      }
+
+      inputMotion = points;
+      t = 0;
+      running = false;
+      computeResponse();
+      syncTimeControls();
+      currentSourceLabel = sourceLabel;
+      const dtEstimate = points[1].time - points[0].time;
+      const baselineSource = Number.isFinite(headerOffset) ? "#Offset" : "先頭データ平均";
+      setStatus(`${sourceLabel}: ${points.length}点を読み込みました。dt=${dtEstimate.toFixed(4)}s、加速度列は ${accUnit.options[accUnit.selectedIndex].text} として扱います。${baselineSource}で基線補正 ${baseline.toFixed(5)} m/s² を差し引きました。`);
+    }
+
+    async function readFile(file) {
+      currentSourceLabel = file.webkitRelativePath || file.name;
+      columnOffsets = {};
+      const name = file.name.toLowerCase();
+      if (name.endsWith(".xlsx") || name.endsWith(".xls")) {
+        if (!window.XLSX) {
+          setStatus("Excelを読むライブラリを読み込めませんでした。CSV形式で保存してから読み込んでください。", true);
+          return;
+        }
+        const buffer = await file.arrayBuffer();
+        const workbook = XLSX.read(buffer, { type: "array" });
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        const table = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, blankrows: false });
+        populateColumns(table.filter(row => row.length), currentSourceLabel);
+        return;
+      }
+
+      const text = await file.text();
+      populateColumns(parseDelimited(text), currentSourceLabel);
+    }
+
+    async function loadSelectedFolderFile() {
+      const file = folderFiles[Number.parseInt(dataFileSelect.value, 10)];
+      if (!file) return;
+      try {
+        await readFile(file);
+      } catch (error) {
+        setStatus(`読み込みに失敗しました: ${error.message}`, true);
+      }
+    }
+
+    function filePath(file) {
+      return file.webkitRelativePath || file.name;
+    }
+
+    function networkFromFile(file) {
+      const path = filePath(file);
+      if (/\/kik(?:-net)?\//i.test(path)) return "kik";
+      if (/\/knet\//i.test(path) || /\/k-net\//i.test(path)) return "knet";
+      return "other";
+    }
+
+    function networkLabel(value) {
+      if (value === "kik") return "KiK-net";
+      if (value === "knet") return "K-NET";
+      if (value === "other") return "その他";
+      return "すべて";
+    }
+
+    function selectedNetworkFiles() {
+      const selectedNetwork = networkSelect.value;
+      return folderFiles
+        .map((file, index) => ({ file, index }))
+        .filter(({ file }) => !selectedNetwork || networkFromFile(file) === selectedNetwork);
+    }
+
+    function stationCodeFromFile(file) {
+      const baseName = file.name.replace(/\.[^.]+$/, "");
+      return baseName.replace(/\d{10}$/, "");
+    }
+
+    function stationGroupFromCode(code) {
+      if (/^[A-Z]{3}H/i.test(code)) return code.slice(0, 4).toUpperCase();
+      const match = code.match(/^[A-Z]+/i);
+      return match ? match[0].toUpperCase() : code.toUpperCase();
+    }
+
+    function stationLabel(file) {
+      const code = stationCodeFromFile(file);
+      const path = filePath(file);
+      const network = networkLabel(networkFromFile(file));
+      return `${code} (${network}) - ${path}`;
+    }
+
+    function populateNetworks() {
+      const counts = new Map();
+      for (const file of folderFiles) {
+        const network = networkFromFile(file);
+        counts.set(network, (counts.get(network) || 0) + 1);
+      }
+
+      networkSelect.innerHTML = "";
+      networkSelect.append(new Option(`すべて (${folderFiles.length}件)`, ""));
+      ["knet", "kik", "other"].forEach(network => {
+        const count = counts.get(network) || 0;
+        if (count > 0) networkSelect.append(new Option(`${networkLabel(network)} (${count}件)`, network));
+      });
+
+      networkSelect.disabled = counts.size <= 1;
+      if (counts.has("knet") && !counts.has("kik")) {
+        networkSelect.value = "knet";
+      } else if (counts.has("kik") && !counts.has("knet")) {
+        networkSelect.value = "kik";
+      } else {
+        networkSelect.value = "";
+      }
+    }
+
+    function populateStationGroups() {
+      const groups = new Map();
+      const candidates = selectedNetworkFiles();
+      for (const { file } of candidates) {
+        const group = stationGroupFromCode(stationCodeFromFile(file));
+        groups.set(group, (groups.get(group) || 0) + 1);
+      }
+
+      stationGroupSelect.innerHTML = "";
+      stationGroupSelect.append(new Option(`すべて (${candidates.length}件)`, ""));
+      [...groups.entries()]
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .forEach(([group, count]) => {
+          stationGroupSelect.append(new Option(`${group} (${count}件)`, group));
+        });
+
+      stationGroupSelect.disabled = false;
+
+      if (groups.has("ABSH")) {
+        stationGroupSelect.value = "ABSH";
+      } else if (groups.has("AICH")) {
+        stationGroupSelect.value = "AICH";
+      }
+    }
+
+    function renderFolderFileOptions() {
+      const selectedGroup = stationGroupSelect.value;
+      visibleFolderFileIndexes = selectedNetworkFiles()
+        .filter(({ file }) => {
+          if (!selectedGroup) return true;
+          return stationGroupFromCode(stationCodeFromFile(file)) === selectedGroup;
+        })
+        .map(({ index }) => index);
+
+      dataFileSelect.innerHTML = "";
+      if (!visibleFolderFileIndexes.length) {
+        dataFileSelect.disabled = true;
+        dataFileSelect.append(new Option("該当する観測点ファイルがありません", ""));
+        setStatus("選択した観測点グループに該当するファイルがありません。", true);
+        return false;
+      }
+
+      for (const index of visibleFolderFileIndexes) {
+        const file = folderFiles[index];
+        dataFileSelect.append(new Option(stationLabel(file), String(index)));
+      }
+
+      dataFileSelect.disabled = false;
+      const firstKnetIndex = visibleFolderFileIndexes.find(index => networkFromFile(folderFiles[index]) === "knet");
+      dataFileSelect.value = String(firstKnetIndex >= 0 ? firstKnetIndex : visibleFolderFileIndexes[0]);
+
+      const label = selectedGroup || "すべて";
+      setStatus(`${networkLabel(networkSelect.value)} / ${label}: ${visibleFolderFileIndexes.length}件の観測点ファイルから選択できます。`);
+      return true;
+    }
+
+    function interpolateAcc(time) {
+      const data = inputMotion;
+      if (time <= data[0].time) return data[0].acc;
+      if (time >= data[data.length - 1].time) return 0;
+
+      let lo = 0;
+      let hi = data.length - 1;
+      while (hi - lo > 1) {
+        const mid = Math.floor((lo + hi) / 2);
+        if (data[mid].time <= time) lo = mid;
+        else hi = mid;
+      }
+
+      const a = data[lo];
+      const b = data[hi];
+      const r = (time - a.time) / (b.time - a.time || 1);
+      return a.acc + (b.acc - a.acc) * r;
+    }
+
+    function computeResponse() {
+      const omega = Math.max(0.001, numberValue(omegaInput, 5));
+      const h = Math.max(0, numberValue(hInput, 0.05));
+      const dt = Math.max(0.001, numberValue(timeStep, 0.01));
+      const endTime = inputMotion[inputMotion.length - 1].time;
+
+      response = [];
+      let x = 0;
+      let v = 0;
+
+      function deriv(time, displacement, velocity) {
+        const groundAcc = interpolateAcc(time);
+        const acceleration = -groundAcc - 2 * h * omega * velocity - omega * omega * displacement;
+        return { dx: velocity, dv: acceleration };
+      }
+
+      for (let time = 0; time <= endTime; time += dt) {
+        response.push({ time, x, v, ag: interpolateAcc(time) });
+
+        const k1 = deriv(time, x, v);
+        const k2 = deriv(time + dt / 2, x + k1.dx * dt / 2, v + k1.dv * dt / 2);
+        const k3 = deriv(time + dt / 2, x + k2.dx * dt / 2, v + k2.dv * dt / 2);
+        const k4 = deriv(time + dt, x + k3.dx * dt, v + k3.dv * dt);
+
+        x += (dt / 6) * (k1.dx + 2 * k2.dx + 2 * k3.dx + k4.dx);
+        v += (dt / 6) * (k1.dv + 2 * k2.dv + 2 * k3.dv + k4.dv);
+      }
+      if (typeof timeSlider !== "undefined") syncTimeControls();
+    }
+
+    function responseAt(time) {
+      if (!response.length) return { x: 0, ag: 0 };
+      if (time <= response[0].time) return response[0];
+      if (time >= response[response.length - 1].time) return response[response.length - 1];
+      const dt = response[1].time - response[0].time;
+      const index = Math.min(response.length - 2, Math.max(0, Math.floor(time / dt)));
+      const a = response[index];
+      const b = response[index + 1];
+      const r = (time - a.time) / (b.time - a.time || 1);
+      return {
+        time,
+        x: a.x + (b.x - a.x) * r,
+        v: a.v + (b.v - a.v) * r,
+        ag: a.ag + (b.ag - a.ag) * r
+      };
+    }
+
+    function displayXPixels(current, limitBase) {
+      const zoom = numberValue(zoomInput, 20);
+      const rawXPixels = current.x * zoom * 100;
+      return limitBase * Math.tanh(rawXPixels / limitBase);
+    }
+
+    function drawMassModel(centerX, groundY, current) {
+      const buildingHeight = 250;
+      const xPixels = displayXPixels(current, Math.min(motionCanvas.width * 0.34, buildingHeight * 0.86));
+      const topY = groundY - Math.sqrt(Math.max(0, buildingHeight * buildingHeight - xPixels * xPixels));
+
+      m.strokeStyle = "#172033";
+      m.lineWidth = 4;
+      m.beginPath();
+      const segments = 18;
+      for (let i = 0; i <= segments; i++) {
+        const r = i / segments;
+        const px = centerX + xPixels * r;
+        const py = groundY + (topY - groundY) * r;
+        if (i === 0) m.moveTo(px, py);
+        else m.lineTo(px, py);
+      }
+      m.stroke();
+
+      const topX = centerX + xPixels;
+      m.fillStyle = "#dbeafe";
+      m.strokeStyle = "#1d4ed8";
+      m.lineWidth = 2;
+      m.fillRect(topX - 34, topY - 28, 68, 56);
+      m.strokeRect(topX - 34, topY - 28, 68, 56);
+    }
+
+    function drawHouseModel(centerX, groundY, current) {
+      const houseWidth = 150;
+      const wallHeight = 110;
+      const roofHeight = 58;
+      const xPixels = displayXPixels(current, motionCanvas.width * 0.28);
+      const shear = xPixels * 0.55;
+      const baseY = groundY;
+      const wallTopY = baseY - wallHeight;
+      const roofPeakY = wallTopY - roofHeight;
+      const baseLeft = centerX - houseWidth / 2;
+      const baseRight = centerX + houseWidth / 2;
+      const topLeft = baseLeft + shear;
+      const topRight = baseRight + shear;
+      const roofPeakX = centerX + xPixels;
+
+      function wallPoint(localX, localY) {
+        const r = localY / wallHeight;
+        return {
+          x: baseLeft + localX + shear * r,
+          y: baseY - localY
+        };
+      }
+
+      function drawWallRect(localX, localY, rectWidth, rectHeight, fill, stroke) {
+        const p1 = wallPoint(localX, localY);
+        const p2 = wallPoint(localX + rectWidth, localY);
+        const p3 = wallPoint(localX + rectWidth, localY + rectHeight);
+        const p4 = wallPoint(localX, localY + rectHeight);
+        m.fillStyle = fill;
+        m.strokeStyle = stroke;
+        m.lineWidth = 2;
+        m.beginPath();
+        m.moveTo(p1.x, p1.y);
+        m.lineTo(p2.x, p2.y);
+        m.lineTo(p3.x, p3.y);
+        m.lineTo(p4.x, p4.y);
+        m.closePath();
+        m.fill();
+        m.stroke();
+      }
+
+      m.fillStyle = "#fef3c7";
+      m.strokeStyle = "#78350f";
+      m.lineWidth = 2;
+      m.beginPath();
+      m.moveTo(baseLeft, baseY);
+      m.lineTo(baseRight, baseY);
+      m.lineTo(topRight, wallTopY);
+      m.lineTo(topLeft, wallTopY);
+      m.closePath();
+      m.fill();
+      m.stroke();
+
+      m.fillStyle = "#b91c1c";
+      m.strokeStyle = "#7f1d1d";
+      m.beginPath();
+      m.moveTo(topLeft - 18, wallTopY);
+      m.lineTo(topRight + 18, wallTopY);
+      m.lineTo(roofPeakX, roofPeakY);
+      m.closePath();
+      m.fill();
+      m.stroke();
+
+      drawWallRect(28, 48, 32, 28, "#bfdbfe", "#1e3a8a");
+      drawWallRect(houseWidth - 54, 0, 30, 58, "#92400e", "#451a03");
+    }
+
+    function drawMotion(current) {
+      const width = motionCanvas.width;
+      const height = motionCanvas.height;
+      const groundY = height - 48;
+      const centerX = width / 2;
+      const groundShift = -current.ag * 4;
+
+      m.clearRect(0, 0, width, height);
+      m.fillStyle = "#f3f6fa";
+      m.fillRect(0, 0, width, height);
+
+      m.strokeStyle = "#8c99aa";
+      m.lineWidth = 1;
+      for (let y = 35; y < groundY; y += 35) {
+        m.beginPath();
+        m.moveTo(28, y);
+        m.lineTo(width - 28, y);
+        m.stroke();
+      }
+
+      m.fillStyle = "#65758b";
+      m.fillRect(0, groundY + groundShift, width, 8);
+
+      if (modelSelect.value === "house") {
+        drawHouseModel(centerX, groundY + groundShift, current);
+      } else {
+        drawMassModel(centerX, groundY + groundShift, current);
+      }
+
+      m.fillStyle = "#172033";
+      m.font = "14px system-ui, sans-serif";
+      m.fillText(`t = ${t.toFixed(2)} s`, 18, 28);
+      m.fillText(`x = ${(current.x * 100).toFixed(2)} cm`, 18, 50);
+    }
+
+    function drawGraph() {
+      const width = graphCanvas.width;
+      const height = graphCanvas.height;
+      const mid = height / 2;
+      const windowSec = 12;
+      const start = Math.max(0, t - windowSec);
+      const end = start + windowSec;
+      const zoom = numberValue(zoomInput, 20);
+
+      g.clearRect(0, 0, width, height);
+      g.fillStyle = "#ffffff";
+      g.fillRect(0, 0, width, height);
+
+      g.strokeStyle = "#d7dde8";
+      g.lineWidth = 1;
+      g.beginPath();
+      g.moveTo(0, mid);
+      g.lineTo(width, mid);
+      g.stroke();
+
+      g.strokeStyle = "#1864ab";
+      g.lineWidth = 2;
+      g.beginPath();
+      let drew = false;
+      for (let px = 0; px < width; px++) {
+        const time = start + (px / width) * (end - start);
+        const current = responseAt(time);
+        const py = mid - current.x * zoom * 100;
+        if (!drew) {
+          g.moveTo(px, py);
+          drew = true;
+        } else {
+          g.lineTo(px, py);
+        }
+      }
+      g.stroke();
+
+      g.fillStyle = "#172033";
+      g.font = "13px system-ui, sans-serif";
+      g.fillText("応答変位 x", 12, 22);
+      g.fillText(`${start.toFixed(1)} s`, 12, height - 12);
+      g.fillText(`${end.toFixed(1)} s`, width - 60, height - 12);
+    }
+
+    function draw(timestamp) {
+      if (lastFrameTime === null) lastFrameTime = timestamp;
+      const elapsed = Math.min(0.05, (timestamp - lastFrameTime) / 1000);
+      lastFrameTime = timestamp;
+
+      if (!response.length) computeResponse();
+      const duration = endTime();
+
+      if (running) {
+        t += elapsed * numberValue(speedInput, 1);
+        if (t >= duration) {
+          t = duration;
+          running = false;
+        }
+      }
+      syncTimeControls();
+
+      const current = responseAt(t);
+      drawMotion(current);
+      drawGraph();
+      requestAnimationFrame(draw);
+    }
+
+    folderInput.addEventListener("change", async event => {
+      folderFiles = Array.from(event.target.files)
+        .filter(file => /\.(csv|tsv|txt|xlsx|xls)$/i.test(file.name) && !file.name.startsWith("."))
+        .sort((a, b) => filePath(a).localeCompare(filePath(b)));
+
+      networkSelect.innerHTML = "";
+      stationGroupSelect.innerHTML = "";
+      dataFileSelect.innerHTML = "";
+      if (!folderFiles.length) {
+        networkSelect.disabled = true;
+        networkSelect.append(new Option("フォルダを選択してください", ""));
+        stationGroupSelect.disabled = true;
+        stationGroupSelect.append(new Option("フォルダを選択してください", ""));
+        dataFileSelect.disabled = true;
+        dataFileSelect.append(new Option("CSV/XLSXが見つかりません", ""));
+        setStatus("選択されたフォルダ内にCSV/XLSXファイルが見つかりませんでした。", true);
+        return;
+      }
+
+      populateNetworks();
+      populateStationGroups();
+      if (renderFolderFileOptions()) await loadSelectedFolderFile();
+    });
+
+    networkSelect.addEventListener("change", async () => {
+      populateStationGroups();
+      if (renderFolderFileOptions()) await loadSelectedFolderFile();
+    });
+
+    stationGroupSelect.addEventListener("change", async () => {
+      if (renderFolderFileOptions()) await loadSelectedFolderFile();
+    });
+
+    dataFileSelect.addEventListener("change", loadSelectedFolderFile);
+
+    timeColumn.addEventListener("change", () => updateMotionFromRows());
+    accColumn.addEventListener("change", () => updateMotionFromRows());
+    accUnit.addEventListener("change", () => updateMotionFromRows());
+    timeStep.addEventListener("change", () => {
+      t = 0;
+      computeResponse();
+      syncTimeControls();
+    });
+    omegaInput.addEventListener("change", () => {
+      t = 0;
+      computeResponse();
+      syncTimeControls();
+    });
+    hInput.addEventListener("change", () => {
+      t = 0;
+      computeResponse();
+      syncTimeControls();
+    });
+    speedInput.addEventListener("input", syncRangeReadouts);
+    zoomInput.addEventListener("input", syncRangeReadouts);
+
+    document.getElementById("startButton").addEventListener("click", () => { running = true; });
+    document.getElementById("pauseButton").addEventListener("click", () => { running = false; });
+    document.getElementById("resetButton").addEventListener("click", () => {
+      running = false;
+      setPlaybackTime(0);
+    });
+    timeSlider.addEventListener("input", () => {
+      running = false;
+      setPlaybackTime(timeSlider.value);
+    });
+
+    populateColumns([
+      ["time", "acceleration_gal"],
+      ...makeSampleMotion().map(point => [point.time, point.acc])
+    ]);
+    syncRangeReadouts();
+    requestAnimationFrame(draw);
+  </script>
+</body>
+</html>
